@@ -152,9 +152,16 @@ router.get('/interviews', async (req, res) => {
 // @route POST /api/recruiter/interviews
 router.post('/interviews', async (req, res) => {
   try {
+    // ── Validate that scheduledAt is in the future ──
+    const scheduledAt = new Date(req.body.scheduledAt);
+    if (isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
+      return res.status(400).json({ success: false, message: 'Interview must be scheduled for a future date and time.' });
+    }
+
     const interview = await Interview.create({
       ...req.body,
       recruiter: req.user._id,
+      scheduledAt,
     });
 
     // Update application status
@@ -169,12 +176,27 @@ router.post('/interviews', async (req, res) => {
     await User.findByIdAndUpdate(req.body.candidate, {
       $push: {
         notifications: {
-          message: `Interview scheduled on ${new Date(req.body.scheduledAt).toLocaleDateString()} - Click to join`,
+          message: `Interview scheduled on ${scheduledAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} — Click to join`,
           type: 'success',
           link: `/candidate/interviews`,
         },
       },
     });
+
+    // Notify panelists (if panel mode)
+    if (req.body.interviewMode === 'panel' && Array.isArray(req.body.panelists)) {
+      for (const panelistId of req.body.panelists) {
+        await User.findByIdAndUpdate(panelistId, {
+          $push: {
+            notifications: {
+              message: `You have been added as a panelist for an interview on ${scheduledAt.toLocaleDateString('en-IN')}`,
+              type: 'info',
+              link: `/recruiter/dashboard`,
+            },
+          },
+        });
+      }
+    }
 
     const io = req.app.get('io');
     if (io) {

@@ -11,6 +11,10 @@ const InterviewSchema = new mongoose.Schema({
   aiMode: { type: String, enum: ['full', 'assisted'], default: 'full' },
   customQuestions: [{ type: String }],
 
+  // Video interview mode
+  interviewMode: { type: String, enum: ['one_to_one', 'panel'], default: 'one_to_one' },
+  panelists: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // additional recruiters for panel
+
   roomId: { type: String, default: () => uuidv4(), unique: true },
 
   scheduledAt: { type: Date, required: true },

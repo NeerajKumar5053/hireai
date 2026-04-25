@@ -21,6 +21,7 @@ const UserSchema = new mongoose.Schema({
   resumePublicId: { type: String },
   headline: { type: String },
   bio: { type: String },
+  phone: { type: String },
   skills: [{ type: String }],
   experience: { type: String, enum: ['fresher', 'entry', 'mid', 'senior', 'lead'], default: 'fresher' },
   location: { type: String },

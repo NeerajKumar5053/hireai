@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { protect, authorize } = require('../middleware/auth');
+const { uploadPDF } = require('../middleware/upload');
+const pdfParse = require('pdf-parse');
 const Application = require('../models/Application');
 const Interview = require('../models/Interview');
 const InterviewSession = require('../models/InterviewSession');
 const Job = require('../models/Job');
 const User = require('../models/User');
+const groqService = require('../services/groqService');
 
 router.use(protect, authorize('candidate'));
 
@@ -157,6 +160,98 @@ router.get('/profile', async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
     res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// @route POST /api/candidate/resume/upload
+// Upload a PDF resume, extract text, parse with AI, autofill profile
+router.post('/resume/upload', uploadPDF.single('resume'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No PDF file uploaded. Please attach a PDF resume.' });
+    }
+
+    // Extract raw text from PDF buffer
+    let pdfText = '';
+    try {
+      const pdfData = await pdfParse(req.file.buffer);
+      pdfText = pdfData.text || '';
+    } catch (pdfErr) {
+      return res.status(422).json({ success: false, message: 'Could not read PDF — please ensure it is a text-based (non-scanned) PDF.' });
+    }
+
+    if (!pdfText || pdfText.trim().length < 50) {
+      return res.status(422).json({ success: false, message: 'PDF appears to be empty or scanned. Please use a text-based PDF.' });
+    }
+
+    // Parse resume with Groq AI
+    const parsed = await groqService.parseResume(pdfText);
+
+    // Build profile update — only overwrite fields that the AI actually found
+    const updates = {};
+    if (parsed.name && parsed.name.trim())               updates.name = parsed.name.trim();
+    if (parsed.headline && parsed.headline.trim())        updates.headline = parsed.headline.trim();
+    if (parsed.location && parsed.location.trim())        updates.location = parsed.location.trim();
+    if (parsed.phone && parsed.phone.trim())              updates.phone = parsed.phone.trim();
+    if (Array.isArray(parsed.skills) && parsed.skills.length > 0) {
+      // Merge with existing skills (union)
+      const existing = req.user.skills || [];
+      const merged = [...new Set([...existing, ...parsed.skills])];
+      updates.skills = merged;
+    }
+    if (parsed.experience && ['fresher','entry','mid','senior','lead'].includes(parsed.experience)) {
+      updates.experience = parsed.experience;
+    }
+    if (parsed.bio) updates.bio = parsed.bio;
+    if (parsed.linkedIn) updates.linkedIn = parsed.linkedIn;
+    if (parsed.github) updates.github = parsed.github;
+
+    // Auto-update the user profile
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      updates,
+      { new: true, runValidators: false }
+    );
+
+    res.json({
+      success: true,
+      message: 'Resume parsed and profile updated!',
+      parsed,
+      user: updatedUser,
+    });
+  } catch (err) {
+    console.error('Resume upload error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// @route GET /api/candidate/job-recommendations
+// Return jobs sorted by match with the candidate's skills
+router.get('/job-recommendations', async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    const skills = user.skills || [];
+    const experience = user.experience;
+
+    // Find active jobs
+    const jobs = await Job.find({ status: 'active' }).limit(20).lean();
+
+    // Score each job by skill overlap
+    const scored = jobs.map(job => {
+      const jobSkills = (job.skills || []).map(s => s.toLowerCase());
+      const candidateSkills = skills.map(s => s.toLowerCase());
+      const matchCount = candidateSkills.filter(s => jobSkills.includes(s)).length;
+      const totalSkills = Math.max(jobSkills.length, 1);
+      const score = Math.round((matchCount / totalSkills) * 100);
+      return { ...job, matchScore: score, matchedSkills: candidateSkills.filter(s => jobSkills.includes(s)) };
+    });
+
+    // Sort by score descending
+    scored.sort((a, b) => b.matchScore - a.matchScore);
+
+    res.json({ success: true, jobs: scored.slice(0, 10) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

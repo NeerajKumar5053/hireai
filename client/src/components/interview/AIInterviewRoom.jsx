@@ -9,7 +9,7 @@ import CheatWarningOverlay from './CheatWarningOverlay'
 import toast from 'react-hot-toast'
 
 const TOTAL_QUESTIONS = 8
-const INTERVIEW_DURATION = 30 * 60
+// INTERVIEW_DURATION is computed from sessionData.duration — not hardcoded
 
 // ── WAV Encoder Utility ──────────────────────────────────────────────────────
 const encodeWAV = (samples, sampleRate) => {
@@ -80,7 +80,7 @@ export default function AIInterviewRoom({ isPractice = false }) {
   const [sessionData, setSessionData] = useState(null)
   const [emotionSnapshots, setEmotionSnapshots] = useState([])
   const [cheatEvents, setCheatEvents] = useState([])
-  const [timeLeft, setTimeLeft] = useState(INTERVIEW_DURATION)
+  const [timeLeft, setTimeLeft] = useState(30 * 60) // will be updated from sessionData
   const [cameraReady, setCameraReady] = useState(false)
   const [micReady, setMicReady] = useState(false)
   const [job, setJob] = useState(null)
@@ -92,6 +92,7 @@ export default function AIInterviewRoom({ isPractice = false }) {
   const [warningCount, setWarningCount] = useState(0)
   const [showWarningOverlay, setShowWarningOverlay] = useState(false)
   const [warningReason, setWarningReason] = useState('')
+  const [violationType, setViolationType] = useState('generic')
   const [interviewPaused, setInterviewPaused] = useState(false)
 
   const videoRef = useRef(null)
@@ -133,6 +134,9 @@ export default function AIInterviewRoom({ isPractice = false }) {
           const { data } = await api.get(`/candidate/interviews/${interviewId}/join`)
           setJob(data.interview?.job)
           setSessionData(data.interview)
+          // Set timer from the scheduled interview duration
+          const durationMins = data.interview?.duration || 30
+          setTimeLeft(durationMins * 60)
         } catch {
           toast.error('Could not load interview details')
         }
@@ -213,10 +217,11 @@ export default function AIInterviewRoom({ isPractice = false }) {
   }, [synth])
 
   // ── Warning / Terminate handlers ───────────────────────────────────────────
-  const handleWarning = useCallback((n, reason) => {
+  const handleWarning = useCallback((n, reason, type = 'generic') => {
     synth.cancel()                    // stop AI speaking
     setWarningCount(n)
     setWarningReason(reason)
+    setViolationType(type)
     setInterviewPaused(true)
     setShowWarningOverlay(true)
     toast(`⚠️ Warning ${n} of 3: ${reason}`, { duration: 3000 })
@@ -226,6 +231,7 @@ export default function AIInterviewRoom({ isPractice = false }) {
     synth.cancel()
     setWarningCount(3)
     setWarningReason(reason)
+    setViolationType('generic')
     setInterviewPaused(true)
     setShowWarningOverlay(true)
   }, [synth])
@@ -551,7 +557,7 @@ export default function AIInterviewRoom({ isPractice = false }) {
   // ──────────────────────────────────────────────────────────────────────────
   if (phase === 'setup') {
     return (
-      <div className="interview-room">
+      <div className="interview-room" style={{ position: 'fixed', inset: 0, zIndex: 9000, overflowY: 'auto' }}>
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px' }}>
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -580,7 +586,7 @@ export default function AIInterviewRoom({ isPractice = false }) {
                 '🔊 The AI will speak each question aloud via your speakers',
                 '👁️ Stay in frame for emotion monitoring (optional)',
                 '🚫 Do not switch tabs — anti-cheat monitoring is active',
-                `📊 ${TOTAL_QUESTIONS} questions total · 30 minutes maximum`,
+                `📊 ${TOTAL_QUESTIONS} questions total · ${sessionData?.duration || 30} minutes maximum`,
               ].map((r, i) => (
                 <div key={i} style={{ fontSize: '13px', color: 'var(--text-secondary)', padding: '4px 0', display: 'flex', gap: '8px' }}>
                   {r}
@@ -649,7 +655,7 @@ export default function AIInterviewRoom({ isPractice = false }) {
   // ──────────────────────────────────────────────────────────────────────────
   if (phase === 'ending' || phase === 'done') {
     return (
-      <div className="interview-room" style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <div className="interview-room" style={{ position: 'fixed', inset: 0, zIndex: 9000, alignItems: 'center', justifyContent: 'center' }}>
         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '4rem', marginBottom: '24px' }}>📊</div>
           <h2 style={{ marginBottom: '12px' }}>Generating Your Report</h2>
@@ -667,7 +673,7 @@ export default function AIInterviewRoom({ isPractice = false }) {
   // RENDER: INTERVIEW screen
   // ──────────────────────────────────────────────────────────────────────────
   return (
-    <div className="interview-room">
+    <div className="interview-room" style={{ position: 'fixed', inset: 0, zIndex: 9000, overflow: 'hidden' }}>
       {/* ── Header ── */}
       <div className="interview-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -968,6 +974,7 @@ export default function AIInterviewRoom({ isPractice = false }) {
         visible={showWarningOverlay}
         warningNumber={warningCount}
         reason={warningReason}
+        violationType={violationType}
         onResume={handleResumeFromWarning}
         onTerminated={handleTerminationComplete}
       />

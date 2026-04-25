@@ -50,5 +50,18 @@ const uploadResume = multer({ storage: resumeStorage, limits: { fileSize: 5 * 10
 const uploadPhoto  = multer({ storage: photoStorage,  limits: { fileSize: 3 * 1024 * 1024 } });
 const uploadAudio  = multer({ storage: audioStorage,  limits: { fileSize: 25 * 1024 * 1024 } });
 
-module.exports = { uploadResume, uploadPhoto, uploadAudio };
+// PDF-only upload for AI resume parsing (always memory so we can read the buffer)
+const uploadPDF = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed for resume upload'), false);
+    }
+  },
+});
+
+module.exports = { uploadResume, uploadPhoto, uploadAudio, uploadPDF };
 
